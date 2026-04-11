@@ -19,9 +19,17 @@ class ProjectNotFoundError(Exception):
     pass
 
 
+class NotFoundError(Exception):
+    """
+    파일이나 디렉토리를 찾을 수 없음
+    HTTP 404로 매핑됨
+    """
+    pass
+
+
 class FileLikeError(Exception):
     """
-    파일과 관련된 에러 (인코딩, 디렉토리 등)
+    파일과 관련된 형식/타입 에러 (인코딩, 타입 불일치 등)
     HTTP 400으로 매핑됨
     """
     pass

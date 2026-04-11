@@ -1,5 +1,4 @@
 import pytest
-import json
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from fastapi.testclient import TestClient
@@ -35,6 +34,13 @@ def temp_project():
 def registered_project(temp_project):
     """
     프로젝트 저장소에 등록된 프로젝트를 반환합니다.
+
+    주의: 현재 구현은 전역 config.json을 수정합니다.
+    병렬 테스트 실행이 필요하면, pytest-xdist 사용 시 충돌 가능성이 있습니다.
+    개선방안:
+    - 각 테스트마다 독립적인 temp config 파일 생성
+    - monkeypatch로 project_service.CONFIG_PATH를 임시 변경
+    - 또는 project_service를 mock하여 in-memory config 사용
     """
     # 임시로 config.json 수정
     original_config = project_service.load_config()
@@ -98,11 +104,11 @@ class TestFileTree:
         assert "config.json" in names
 
     def test_list_nonexistent_path(self, registered_project):
-        """존재하지 않는 경로 조회 (400)"""
+        """존재하지 않는 경로 조회 (404)"""
         response = client.get(
             f"/api/files/tree?project_id={registered_project}&path=nonexistent"
         )
-        assert response.status_code == 400
+        assert response.status_code == 404
 
     def test_list_file_as_directory(self, registered_project):
         """파일을 디렉토리처럼 조회 (400)"""
@@ -168,12 +174,12 @@ class TestFileContent:
         assert "key" in data["content"]
 
     def test_read_nonexistent_file(self, registered_project):
-        """존재하지 않는 파일 읽기 (404는 아니고 400)"""
+        """존재하지 않는 파일 읽기 (404)"""
         response = client.get(
             f"/api/files/content?project_id={registered_project}&path=nonexistent.txt"
         )
-        # FileLikeError -> 400
-        assert response.status_code == 400
+        # NotFoundError -> 404
+        assert response.status_code == 404
 
     def test_read_directory_as_file(self, registered_project):
         """디렉토리를 파일로 읽기 (400)"""
@@ -383,6 +389,20 @@ class TestStatusCodeMapping:
         )
         assert response.status_code == 404
 
+    def test_file_not_found_returns_404(self, registered_project):
+        """NotFoundError (파일 없음) -> 404"""
+        response = client.get(
+            f"/api/files/content?project_id={registered_project}&path=nonexistent.txt"
+        )
+        assert response.status_code == 404
+
+    def test_directory_not_found_returns_404(self, registered_project):
+        """NotFoundError (디렉토리 없음) -> 404"""
+        response = client.get(
+            f"/api/files/tree?project_id={registered_project}&path=nonexistent_dir"
+        )
+        assert response.status_code == 404
+
     def test_security_violation_returns_403(self, registered_project):
         """SecurityViolationError -> 403"""
         response = client.get(
@@ -390,15 +410,22 @@ class TestStatusCodeMapping:
         )
         assert response.status_code == 403
 
-    def test_file_like_error_returns_400(self, registered_project):
-        """FileLikeError -> 400"""
+    def test_directory_as_file_returns_400(self, registered_project):
+        """FileLikeError (디렉토리를 파일로 읽기) -> 400"""
         response = client.get(
-            f"/api/files/content?project_id={registered_project}&path=nonexistent.txt"
+            f"/api/files/content?project_id={registered_project}&path=src"
+        )
+        assert response.status_code == 400
+
+    def test_file_as_directory_returns_400(self, registered_project):
+        """FileLikeError (파일을 디렉토리로 조회) -> 400"""
+        response = client.get(
+            f"/api/files/tree?project_id={registered_project}&path=README.md"
         )
         assert response.status_code == 400
 
     def test_directory_save_returns_400(self, registered_project):
-        """디렉토리 저장 시도 -> 400"""
+        """FileLikeError (디렉토리 저장) -> 400"""
         response = client.post(
             "/api/files/content",
             json={
@@ -410,7 +437,7 @@ class TestStatusCodeMapping:
         assert response.status_code == 400
 
     def test_utf8_decode_error_returns_400(self, registered_project, temp_project):
-        """UTF-8 디코딩 실패 -> 400"""
+        """FileLikeError (UTF-8 디코딩 실패) -> 400"""
         binary_file = Path(temp_project["path"]) / "bad.bin"
         binary_file.write_bytes(b"\xff\xfe")
 

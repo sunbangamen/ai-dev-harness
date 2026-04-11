@@ -1,5 +1,5 @@
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List
 from backend.app.schemas.file import (
     FileTreeItem,
     FileTreeResponse,
@@ -10,6 +10,7 @@ from backend.app.services import project_service
 from backend.app.exceptions import (
     SecurityViolationError,
     ProjectNotFoundError,
+    NotFoundError,
     FileLikeError,
 )
 
@@ -75,8 +76,9 @@ def list_directory(project_id: str, path: str = "") -> FileTreeResponse:
 
     Raises:
         ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        NotFoundError: 경로가 존재하지 않음 (404)
+        FileLikeError: 경로가 파일임 (400)
         SecurityViolationError: 경로 보안 위반 또는 권한 없음 (403)
-        FileLikeError: 경로가 존재하지 않거나 파일임 (400)
     """
     # 프로젝트 경로 획득
     project_path = _get_project_path(project_id)
@@ -86,7 +88,7 @@ def list_directory(project_id: str, path: str = "") -> FileTreeResponse:
 
     # 경로 존재 확인
     if not safe_path.exists():
-        raise FileLikeError(f"Path not found: {path}")
+        raise NotFoundError(f"Path not found: {path}")
 
     # 디렉토리 확인
     if not safe_path.is_dir():
@@ -137,8 +139,9 @@ def read_file(project_id: str, path: str) -> FileContentResponse:
 
     Raises:
         ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        NotFoundError: 파일이 없는 경우 (404)
+        FileLikeError: 파일이 디렉토리이거나 디코딩 실패 (400)
         SecurityViolationError: 경로 보안 위반 또는 권한 없음 (403)
-        FileLikeError: 파일이 없거나 디렉토리이거나 디코딩 실패 (400)
     """
     # 프로젝트 경로 획득
     project_path = _get_project_path(project_id)
@@ -148,7 +151,7 @@ def read_file(project_id: str, path: str) -> FileContentResponse:
 
     # 파일 존재 확인
     if not safe_path.exists():
-        raise FileLikeError(f"File not found: {path}")
+        raise NotFoundError(f"File not found: {path}")
 
     # 디렉토리 확인
     if safe_path.is_dir():
@@ -183,8 +186,8 @@ def write_file(project_id: str, path: str, content: str) -> FileSaveResponse:
 
     Raises:
         ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        FileLikeError: 저장 대상이 디렉토리, 상위 디렉토리 없음, 인코딩 실패 (400)
         SecurityViolationError: 경로 보안 위반 또는 권한 없음 (403)
-        FileLikeError: 상위 디렉토리 없음, 저장 대상이 디렉토리, 인코딩 실패 (400)
         IOError: 예상 못 한 저장 실패 (500)
     """
     # 프로젝트 경로 획득

@@ -9,6 +9,7 @@ from backend.app.services import file_service
 from backend.app.exceptions import (
     SecurityViolationError,
     ProjectNotFoundError,
+    NotFoundError,
     FileLikeError,
 )
 
@@ -32,6 +33,8 @@ def get_file_tree(project_id: str, path: str = ""):
         result = file_service.list_directory(project_id, path)
         return result
     except ProjectNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except SecurityViolationError as e:
         raise HTTPException(status_code=403, detail=str(e))
@@ -57,6 +60,8 @@ def get_file_content(project_id: str, path: str):
         result = file_service.read_file(project_id, path)
         return result
     except ProjectNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except SecurityViolationError as e:
         raise HTTPException(status_code=403, detail=str(e))
