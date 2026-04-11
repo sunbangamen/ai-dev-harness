@@ -445,3 +445,239 @@ class TestStatusCodeMapping:
             f"/api/files/content?project_id={registered_project}&path=bad.bin"
         )
         assert response.status_code == 400
+
+
+class TestFileDelete:
+    """파일/디렉토리 삭제 테스트"""
+
+    def test_delete_file(self, registered_project):
+        """파일 삭제"""
+        response = client.delete(
+            f"/api/files?project_id={registered_project}&path=README.md"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["path"] == "README.md"
+
+        # 삭제 확인
+        response = client.get(
+            f"/api/files/content?project_id={registered_project}&path=README.md"
+        )
+        assert response.status_code == 404
+
+    def test_delete_directory_with_contents(self, registered_project):
+        """내용이 있는 디렉토리 삭제"""
+        response = client.delete(
+            f"/api/files?project_id={registered_project}&path=src"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+        # 삭제 확인
+        response = client.get(
+            f"/api/files/tree?project_id={registered_project}&path=src"
+        )
+        assert response.status_code == 404
+
+    def test_delete_nonexistent_path(self, registered_project):
+        """존재하지 않는 경로 삭제 (404)"""
+        response = client.delete(
+            f"/api/files?project_id={registered_project}&path=nonexistent.txt"
+        )
+        assert response.status_code == 404
+
+
+class TestFileMove:
+    """파일/디렉토리 이동 및 이름 변경 테스트"""
+
+    def test_move_file(self, registered_project):
+        """파일 이동"""
+        response = client.post(
+            "/api/files/move",
+            json={
+                "project_id": registered_project,
+                "src_path": "README.md",
+                "dest_path": "moved_readme.md",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["src_path"] == "README.md"
+        assert data["dest_path"] == "moved_readme.md"
+
+        # 이동 확인
+        response = client.get(
+            f"/api/files/content?project_id={registered_project}&path=moved_readme.md"
+        )
+        assert response.status_code == 200
+
+    def test_rename_file(self, registered_project):
+        """파일 이름 변경 (이동과 동일)"""
+        response = client.post(
+            "/api/files/move",
+            json={
+                "project_id": registered_project,
+                "src_path": "README.md",
+                "dest_path": "NOTES.md",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+    def test_move_directory(self, registered_project):
+        """디렉토리 이동"""
+        # 먼저 subdirectory 생성
+        client.post(
+            "/api/files/directory",
+            json={"project_id": registered_project, "path": "dest_folder"},
+        )
+
+        response = client.post(
+            "/api/files/move",
+            json={
+                "project_id": registered_project,
+                "src_path": "src",
+                "dest_path": "dest_folder/src",
+            },
+        )
+        assert response.status_code == 200
+
+    def test_move_nonexistent_source(self, registered_project):
+        """존재하지 않는 원본 (404)"""
+        response = client.post(
+            "/api/files/move",
+            json={
+                "project_id": registered_project,
+                "src_path": "nonexistent.txt",
+                "dest_path": "new.txt",
+            },
+        )
+        assert response.status_code == 404
+
+    def test_move_to_nonexistent_parent(self, registered_project):
+        """대상 부모 디렉토리 없음 (400)"""
+        response = client.post(
+            "/api/files/move",
+            json={
+                "project_id": registered_project,
+                "src_path": "README.md",
+                "dest_path": "nonexistent_dir/file.md",
+            },
+        )
+        assert response.status_code == 400
+
+
+class TestCreateDirectory:
+    """디렉토리 생성 테스트"""
+
+    def test_create_single_directory(self, registered_project):
+        """단일 디렉토리 생성"""
+        response = client.post(
+            "/api/files/directory",
+            json={"project_id": registered_project, "path": "new_folder"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["path"] == "new_folder"
+
+        # 생성 확인
+        response = client.get(
+            f"/api/files/tree?project_id={registered_project}&path=new_folder"
+        )
+        assert response.status_code == 200
+
+    def test_create_nested_directory(self, registered_project):
+        """중첩 경로 디렉토리 생성"""
+        response = client.post(
+            "/api/files/directory",
+            json={
+                "project_id": registered_project,
+                "path": "deep/nested/folder",
+            },
+        )
+        assert response.status_code == 200
+
+        # 생성 확인
+        response = client.get(
+            f"/api/files/tree?project_id={registered_project}&path=deep/nested/folder"
+        )
+        assert response.status_code == 200
+
+    def test_create_directory_already_exists(self, registered_project):
+        """이미 존재하는 경로 (400)"""
+        response = client.post(
+            "/api/files/directory",
+            json={"project_id": registered_project, "path": "src"},
+        )
+        assert response.status_code == 400
+
+
+class TestFileSearch:
+    """파일 검색 테스트"""
+
+    def test_search_exact_name(self, registered_project):
+        """정확한 파일명으로 검색"""
+        response = client.get(
+            f"/api/files/search?project_id={registered_project}&query=README"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["query"] == "README"
+        assert len(data["results"]) > 0
+        assert any(item["name"] == "README.md" for item in data["results"])
+
+    def test_search_partial_name(self, registered_project):
+        """부분 문자열로 검색"""
+        response = client.get(
+            f"/api/files/search?project_id={registered_project}&query=main"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) > 0
+        assert any("main" in item["name"].lower() for item in data["results"])
+
+    def test_search_case_insensitive(self, registered_project):
+        """대소문자 무관 검색"""
+        response = client.get(
+            f"/api/files/search?project_id={registered_project}&query=README"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        results_upper = len(data["results"])
+
+        response = client.get(
+            f"/api/files/search?project_id={registered_project}&query=readme"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        results_lower = len(data["results"])
+
+        assert results_upper == results_lower
+
+    def test_search_returns_both_files_and_dirs(self, registered_project):
+        """파일과 디렉토리 모두 검색"""
+        # "src" 검색 (디렉토리)
+        response = client.get(
+            f"/api/files/search?project_id={registered_project}&query=src"
+        )
+        assert response.status_code == 200
+        data = response.json()
+
+        # 파일과 디렉토리 구분 확인
+        has_file = any(item["type"] == "file" for item in data["results"])
+        has_dir = any(item["type"] == "directory" for item in data["results"])
+        assert has_file or has_dir
+
+    def test_search_no_results(self, registered_project):
+        """검색 결과 없음"""
+        response = client.get(
+            f"/api/files/search?project_id={registered_project}&query=xyzabc123notfound"
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert len(data["results"]) == 0

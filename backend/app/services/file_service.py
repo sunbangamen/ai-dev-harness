@@ -1,10 +1,16 @@
 from pathlib import Path
 from typing import List
+import shutil
 from backend.app.schemas.file import (
     FileTreeItem,
     FileTreeResponse,
     FileContentResponse,
     FileSaveResponse,
+    DeleteResponse,
+    MoveResponse,
+    CreateDirectoryResponse,
+    SearchResultItem,
+    SearchResponse,
 )
 from backend.app.services import project_service
 from backend.app.exceptions import (
@@ -222,3 +228,192 @@ def write_file(project_id: str, path: str, content: str) -> FileSaveResponse:
         raise IOError(f"Failed to write file: {e}")
 
     return FileSaveResponse(success=True, path=path)
+
+
+def delete_path(project_id: str, path: str) -> DeleteResponse:
+    """
+    파일이나 디렉토리를 삭제합니다.
+    디렉토리는 내부가 비어있지 않아도 삭제됩니다 (재귀 삭제).
+
+    Args:
+        project_id: 프로젝트 ID
+        path: 삭제할 파일/디렉토리의 상대 경로
+
+    Returns:
+        DeleteResponse: 삭제 성공 여부와 경로
+
+    Raises:
+        ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        NotFoundError: 파일/디렉토리가 없는 경우 (404)
+        SecurityViolationError: 경로 보안 위반 또는 권한 없음 (403)
+        IOError: 삭제 실패 (500)
+    """
+    # 프로젝트 경로 획득
+    project_path = _get_project_path(project_id)
+
+    # 안전한 경로로 resolve
+    safe_path = resolve_safe_path(project_path, path)
+
+    # 경로 존재 확인
+    if not safe_path.exists():
+        raise NotFoundError(f"Path not found: {path}")
+
+    # 삭제 시도
+    try:
+        if safe_path.is_dir():
+            shutil.rmtree(safe_path)
+        else:
+            safe_path.unlink()
+    except PermissionError as e:
+        raise SecurityViolationError(f"Permission denied: cannot delete {path}")
+    except OSError as e:
+        raise IOError(f"Failed to delete path: {e}")
+    except Exception as e:
+        raise IOError(f"Failed to delete path: {e}")
+
+    return DeleteResponse(success=True, path=path)
+
+
+def move_path(project_id: str, src_path: str, dest_path: str) -> MoveResponse:
+    """
+    파일이나 디렉토리를 이동하거나 이름을 변경합니다.
+
+    Args:
+        project_id: 프로젝트 ID
+        src_path: 원본 파일/디렉토리의 상대 경로
+        dest_path: 대상 파일/디렉토리의 상대 경로
+
+    Returns:
+        MoveResponse: 이동 성공 여부와 경로
+
+    Raises:
+        ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        NotFoundError: 원본 파일/디렉토리가 없는 경우 (404)
+        FileLikeError: 대상 부모 디렉토리 없음 (400)
+        SecurityViolationError: 경로 보안 위반 또는 권한 없음 (403)
+        IOError: 이동 실패 (500)
+    """
+    # 프로젝트 경로 획득
+    project_path = _get_project_path(project_id)
+
+    # 원본과 대상 경로 안전 처리
+    src_safe_path = resolve_safe_path(project_path, src_path)
+    dest_safe_path = resolve_safe_path(project_path, dest_path)
+
+    # 원본 존재 확인
+    if not src_safe_path.exists():
+        raise NotFoundError(f"Source path not found: {src_path}")
+
+    # 대상 부모 디렉토리 확인
+    dest_parent = dest_safe_path.parent
+    if not dest_parent.exists():
+        raise FileLikeError(f"Parent directory does not exist: {dest_path}")
+
+    # 이동 시도
+    try:
+        src_safe_path.rename(dest_safe_path)
+    except PermissionError as e:
+        raise SecurityViolationError(f"Permission denied: cannot move {src_path}")
+    except OSError as e:
+        raise IOError(f"Failed to move path: {e}")
+    except Exception as e:
+        raise IOError(f"Failed to move path: {e}")
+
+    return MoveResponse(success=True, src_path=src_path, dest_path=dest_path)
+
+
+def create_directory(project_id: str, path: str) -> CreateDirectoryResponse:
+    """
+    디렉토리를 생성합니다.
+    중첩된 경로는 자동으로 생성됩니다.
+
+    Args:
+        project_id: 프로젝트 ID
+        path: 생성할 디렉토리의 상대 경로
+
+    Returns:
+        CreateDirectoryResponse: 생성 성공 여부와 경로
+
+    Raises:
+        ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        FileLikeError: 경로가 이미 존재하는 경우 (400)
+        SecurityViolationError: 경로 보안 위반 또는 권한 없음 (403)
+        IOError: 생성 실패 (500)
+    """
+    # 프로젝트 경로 획득
+    project_path = _get_project_path(project_id)
+
+    # 안전한 경로로 resolve
+    safe_path = resolve_safe_path(project_path, path)
+
+    # 이미 존재 확인
+    if safe_path.exists():
+        raise FileLikeError(f"Path already exists: {path}")
+
+    # 디렉토리 생성
+    try:
+        safe_path.mkdir(parents=True, exist_ok=False)
+    except PermissionError as e:
+        raise SecurityViolationError(f"Permission denied: cannot create directory {path}")
+    except FileExistsError as e:
+        raise FileLikeError(f"Path already exists: {path}")
+    except OSError as e:
+        raise IOError(f"Failed to create directory: {e}")
+    except Exception as e:
+        raise IOError(f"Failed to create directory: {e}")
+
+    return CreateDirectoryResponse(success=True, path=path)
+
+
+def search_files(project_id: str, query: str) -> SearchResponse:
+    """
+    프로젝트 내에서 파일/디렉토리를 이름으로 검색합니다.
+    재귀적으로 모든 하위 항목을 탐색합니다.
+
+    Args:
+        project_id: 프로젝트 ID
+        query: 검색 키워드 (부분 문자열 일치)
+
+    Returns:
+        SearchResponse: 검색 결과 목록
+
+    Raises:
+        ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        SecurityViolationError: 권한 없음 (403)
+        IOError: 검색 중 예외 (500)
+    """
+    # 프로젝트 경로 획득
+    project_path = _get_project_path(project_id)
+    base_path = Path(project_path)
+
+    results: List[SearchResultItem] = []
+
+    # 재귀 탐색
+    try:
+        for item in base_path.rglob("*"):
+            # 항목 이름이 query를 포함하는지 확인
+            if query.lower() in item.name.lower():
+                relative = item.relative_to(base_path)
+                relative_str = str(relative).replace("\\", "/")
+
+                if item.is_dir():
+                    item_type = "directory"
+                else:
+                    item_type = "file"
+
+                results.append(
+                    SearchResultItem(
+                        name=item.name,
+                        path=relative_str,
+                        type=item_type,
+                    )
+                )
+    except PermissionError as e:
+        raise SecurityViolationError(f"Permission denied: cannot search in project")
+    except Exception as e:
+        raise IOError(f"Failed to search files: {e}")
+
+    # 결과 정렬
+    results.sort(key=lambda x: x.path)
+
+    return SearchResponse(query=query, results=results)
