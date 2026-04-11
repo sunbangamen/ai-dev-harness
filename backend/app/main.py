@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.app.routes import projects
+from backend.app.routes import projects, files
 
 # FastAPI 앱 생성
 app = FastAPI(
@@ -20,6 +20,7 @@ app.add_middleware(
 
 # 라우트 포함
 app.include_router(projects.router)
+app.include_router(files.router)
 
 
 @app.get("/health")
