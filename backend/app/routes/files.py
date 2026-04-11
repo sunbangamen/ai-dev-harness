@@ -208,6 +208,8 @@ def search_files_by_name(project_id: str, query: str):
         return result
     except ProjectNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
+    except FileLikeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except SecurityViolationError as e:
         raise HTTPException(status_code=403, detail=str(e))
     except IOError as e:

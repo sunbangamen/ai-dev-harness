@@ -488,6 +488,22 @@ class TestFileDelete:
         )
         assert response.status_code == 404
 
+    def test_delete_root_forbidden(self, registered_project):
+        """프로젝트 루트 삭제 시도 (400) - 보안"""
+        response = client.delete(
+            f"/api/files?project_id={registered_project}&path="
+        )
+        assert response.status_code == 400
+        assert "root" in response.json()["detail"].lower()
+
+    def test_delete_path_traversal(self, registered_project):
+        """delete에서 path traversal 공격 차단 (403)"""
+        response = client.delete(
+            f"/api/files?project_id={registered_project}&path=../../../etc/passwd"
+        )
+        assert response.status_code == 403
+        assert "Access denied" in response.json()["detail"]
+
 
 class TestFileMove:
     """파일/디렉토리 이동 및 이름 변경 테스트"""
@@ -570,6 +586,71 @@ class TestFileMove:
         )
         assert response.status_code == 400
 
+    def test_move_root_src_forbidden(self, registered_project):
+        """원본이 루트인 경우 금지 (400)"""
+        response = client.post(
+            "/api/files/move",
+            json={
+                "project_id": registered_project,
+                "src_path": "",
+                "dest_path": "new_name",
+            },
+        )
+        assert response.status_code == 400
+        assert "root" in response.json()["detail"].lower()
+
+    def test_move_root_dest_forbidden(self, registered_project):
+        """대상이 루트인 경우 금지 (400)"""
+        response = client.post(
+            "/api/files/move",
+            json={
+                "project_id": registered_project,
+                "src_path": "README.md",
+                "dest_path": "",
+            },
+        )
+        assert response.status_code == 400
+        assert "root" in response.json()["detail"].lower()
+
+    def test_move_src_path_traversal(self, registered_project):
+        """move에서 원본 경로 traversal 공격 차단 (403)"""
+        response = client.post(
+            "/api/files/move",
+            json={
+                "project_id": registered_project,
+                "src_path": "../../etc/passwd",
+                "dest_path": "file.txt",
+            },
+        )
+        assert response.status_code == 403
+        assert "Access denied" in response.json()["detail"]
+
+    def test_move_dest_path_traversal(self, registered_project):
+        """move에서 대상 경로 traversal 공격 차단 (403)"""
+        response = client.post(
+            "/api/files/move",
+            json={
+                "project_id": registered_project,
+                "src_path": "README.md",
+                "dest_path": "../../etc/passwd",
+            },
+        )
+        assert response.status_code == 403
+        assert "Access denied" in response.json()["detail"]
+
+    def test_move_destination_already_exists(self, registered_project):
+        """대상이 이미 존재할 때 (400)"""
+        response = client.post(
+            "/api/files/move",
+            json={
+                "project_id": registered_project,
+                "src_path": "README.md",
+                "dest_path": "src",  # src 디렉토리가 이미 존재
+            },
+        )
+        assert response.status_code == 400
+        assert "already exists" in response.json()["detail"].lower()
+
 
 class TestCreateDirectory:
     """디렉토리 생성 테스트"""
@@ -615,6 +696,15 @@ class TestCreateDirectory:
             json={"project_id": registered_project, "path": "src"},
         )
         assert response.status_code == 400
+
+    def test_create_directory_path_traversal(self, registered_project):
+        """create_directory에서 path traversal 공격 차단 (403)"""
+        response = client.post(
+            "/api/files/directory",
+            json={"project_id": registered_project, "path": "../../etc/evil"},
+        )
+        assert response.status_code == 403
+        assert "Access denied" in response.json()["detail"]
 
 
 class TestFileSearch:
@@ -681,3 +771,11 @@ class TestFileSearch:
         assert response.status_code == 200
         data = response.json()
         assert len(data["results"]) == 0
+
+    def test_search_empty_query(self, registered_project):
+        """빈 검색 쿼리 금지 (400)"""
+        response = client.get(
+            f"/api/files/search?project_id={registered_project}&query="
+        )
+        assert response.status_code == 400
+        assert "empty" in response.json()["detail"].lower()

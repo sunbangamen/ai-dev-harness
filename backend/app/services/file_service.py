@@ -235,6 +235,8 @@ def delete_path(project_id: str, path: str) -> DeleteResponse:
     파일이나 디렉토리를 삭제합니다.
     디렉토리는 내부가 비어있지 않아도 삭제됩니다 (재귀 삭제).
 
+    주의: 프로젝트 루트 (path="") 삭제는 금지됩니다.
+
     Args:
         project_id: 프로젝트 ID
         path: 삭제할 파일/디렉토리의 상대 경로
@@ -244,12 +246,17 @@ def delete_path(project_id: str, path: str) -> DeleteResponse:
 
     Raises:
         ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        FileLikeError: 루트 삭제 시도 또는 경로가 파일이 아닌 경우 (400)
         NotFoundError: 파일/디렉토리가 없는 경우 (404)
         SecurityViolationError: 경로 보안 위반 또는 권한 없음 (403)
         IOError: 삭제 실패 (500)
     """
     # 프로젝트 경로 획득
     project_path = _get_project_path(project_id)
+
+    # 루트 삭제 금지
+    if not path or path.strip() == "":
+        raise FileLikeError("Cannot delete project root")
 
     # 안전한 경로로 resolve
     safe_path = resolve_safe_path(project_path, path)
@@ -278,6 +285,9 @@ def move_path(project_id: str, src_path: str, dest_path: str) -> MoveResponse:
     """
     파일이나 디렉토리를 이동하거나 이름을 변경합니다.
 
+    주의: 프로젝트 루트 (path="") 이동/이름변경은 금지됩니다.
+    대상 경로가 이미 존재하면 400 에러를 반환합니다.
+
     Args:
         project_id: 프로젝트 ID
         src_path: 원본 파일/디렉토리의 상대 경로
@@ -288,13 +298,19 @@ def move_path(project_id: str, src_path: str, dest_path: str) -> MoveResponse:
 
     Raises:
         ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        FileLikeError: 루트 이동 시도, 대상이 이미 존재, 부모 디렉토리 없음 (400)
         NotFoundError: 원본 파일/디렉토리가 없는 경우 (404)
-        FileLikeError: 대상 부모 디렉토리 없음 (400)
         SecurityViolationError: 경로 보안 위반 또는 권한 없음 (403)
         IOError: 이동 실패 (500)
     """
     # 프로젝트 경로 획득
     project_path = _get_project_path(project_id)
+
+    # 루트 이동/이름변경 금지
+    if not src_path or src_path.strip() == "":
+        raise FileLikeError("Cannot move project root")
+    if not dest_path or dest_path.strip() == "":
+        raise FileLikeError("Cannot move to project root")
 
     # 원본과 대상 경로 안전 처리
     src_safe_path = resolve_safe_path(project_path, src_path)
@@ -303,6 +319,10 @@ def move_path(project_id: str, src_path: str, dest_path: str) -> MoveResponse:
     # 원본 존재 확인
     if not src_safe_path.exists():
         raise NotFoundError(f"Source path not found: {src_path}")
+
+    # 대상이 이미 존재하면 400 거절
+    if dest_safe_path.exists():
+        raise FileLikeError(f"Destination already exists: {dest_path}")
 
     # 대상 부모 디렉토리 확인
     dest_parent = dest_safe_path.parent
@@ -370,18 +390,25 @@ def search_files(project_id: str, query: str) -> SearchResponse:
     프로젝트 내에서 파일/디렉토리를 이름으로 검색합니다.
     재귀적으로 모든 하위 항목을 탐색합니다.
 
+    주의: query는 반드시 한 글자 이상의 문자를 포함해야 합니다.
+
     Args:
         project_id: 프로젝트 ID
-        query: 검색 키워드 (부분 문자열 일치)
+        query: 검색 키워드 (부분 문자열 일치, 비어있으면 안됨)
 
     Returns:
         SearchResponse: 검색 결과 목록
 
     Raises:
         ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        FileLikeError: 검색 키워드가 비어있는 경우 (400)
         SecurityViolationError: 권한 없음 (403)
         IOError: 검색 중 예외 (500)
     """
+    # 검색 키워드 유효성 확인
+    if not query or not query.strip():
+        raise FileLikeError("Search query cannot be empty")
+
     # 프로젝트 경로 획득
     project_path = _get_project_path(project_id)
     base_path = Path(project_path)
