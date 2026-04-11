@@ -1,4 +1,33 @@
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+env/
+ENV/
+
+# Node
 node_modules/
+
+# Environment
 .env
+.env.local
+.env.*.local
+
+# Logs
 *.log
+
+# Local data
+data/config.json
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
