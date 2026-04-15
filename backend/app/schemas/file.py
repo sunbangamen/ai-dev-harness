@@ -78,3 +78,16 @@ class SearchResultItem(BaseModel):
 class SearchResponse(BaseModel):
     query: str          # 검색 키워드
     results: List[SearchResultItem]  # 검색 결과
+
+
+# 파일 생성 요청
+class CreateFileRequest(BaseModel):
+    project_id: str     # 프로젝트 ID
+    path: str           # 생성할 파일 경로
+    content: str = ""   # 초기 내용 (기본값: 빈 파일)
+
+
+# 파일 생성 응답
+class CreateFileResponse(BaseModel):
+    success: bool       # 생성 성공 여부
+    path: str           # 생성한 파일 경로

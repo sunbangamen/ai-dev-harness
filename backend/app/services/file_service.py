@@ -11,6 +11,7 @@ from backend.app.schemas.file import (
     CreateDirectoryResponse,
     SearchResultItem,
     SearchResponse,
+    CreateFileResponse,
 )
 from backend.app.services import project_service
 from backend.app.exceptions import (
@@ -63,7 +64,7 @@ def _get_project_path(project_id: str) -> str:
     """
     projects = project_service.get_all_projects()
     for project in projects:
-        if project.get("id") == project_id:
+        if project.get("project_id") == project_id:
             return project["path"]
 
     raise ProjectNotFoundError(f"Project not found: {project_id}")
@@ -444,3 +445,54 @@ def search_files(project_id: str, query: str) -> SearchResponse:
     results.sort(key=lambda x: x.path)
 
     return SearchResponse(query=query, results=results)
+
+
+def create_file(project_id: str, path: str, content: str = "") -> CreateFileResponse:
+    """
+    프로젝트 내에 새 파일을 생성합니다.
+
+    Args:
+        project_id: 프로젝트 ID
+        path: 생성할 파일 경로 (프로젝트 기준 상대 경로)
+        content: 초기 내용 (기본값: 빈 파일)
+
+    Returns:
+        CreateFileResponse: 생성 결과
+
+    Raises:
+        ProjectNotFoundError: 프로젝트를 찾을 수 없는 경우 (404)
+        FileLikeError: 경로가 이미 존재함 (400)
+        NotFoundError: 부모 디렉토리가 존재하지 않음 (404)
+        SecurityViolationError: 경로 보안 위반 또는 권한 없음 (403)
+    """
+    # 프로젝트 경로 획득
+    project_path = _get_project_path(project_id)
+
+    # 경로 정규화: 앞의 "/" 제거하여 상대 경로로 변환
+    normalized_path = path.lstrip('/')
+
+    # 안전한 경로로 resolve
+    safe_path = resolve_safe_path(project_path, normalized_path)
+
+    # 파일이 이미 존재하는지 확인
+    if safe_path.exists():
+        raise FileLikeError(f"File already exists: {path}")
+
+    # 부모 디렉토리 확인
+    parent_dir = safe_path.parent
+    if not parent_dir.exists():
+        raise NotFoundError(f"Parent directory does not exist: {path}")
+
+    # 부모 디렉토리가 실제로 디렉토리인지 확인
+    if not parent_dir.is_dir():
+        raise FileLikeError(f"Parent is not a directory: {path}")
+
+    # 파일 생성
+    try:
+        safe_path.write_text(content, encoding="utf-8")
+    except PermissionError:
+        raise SecurityViolationError(f"Permission denied: cannot create file")
+    except Exception as e:
+        raise IOError(f"Failed to create file: {e}")
+
+    return CreateFileResponse(success=True, path=path)

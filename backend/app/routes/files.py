@@ -1,4 +1,5 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
+import time
 from backend.app.schemas.file import (
     FileTreeResponse,
     FileContentResponse,
@@ -10,6 +11,8 @@ from backend.app.schemas.file import (
     CreateDirectoryRequest,
     CreateDirectoryResponse,
     SearchResponse,
+    CreateFileRequest,
+    CreateFileResponse,
 )
 from backend.app.services import file_service
 from backend.app.exceptions import (
@@ -51,7 +54,7 @@ def get_file_tree(project_id: str, path: str = ""):
 
 
 @router.get("/content", response_model=FileContentResponse)
-def get_file_content(project_id: str, path: str):
+def get_file_content(project_id: str, path: str, response: Response):
     """
     파일의 내용을 읽습니다 (텍스트).
 
@@ -63,7 +66,16 @@ def get_file_content(project_id: str, path: str):
         FileContentResponse: 파일 내용
     """
     try:
+        # 성능 측정: 파일 읽기 시작
+        start_time = time.time()
         result = file_service.read_file(project_id, path)
+        end_time = time.time()
+
+        # 백엔드 처리 시간을 응답 헤더에 추가 (밀리초 단위)
+        processing_time_ms = (end_time - start_time) * 1000
+        response.headers["X-Server-Processing-Time"] = f"{processing_time_ms:.2f}"
+        response.headers["X-File-Size-Bytes"] = str(len(result.content))
+
         return result
     except ProjectNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
@@ -207,6 +219,38 @@ def search_files_by_name(project_id: str, query: str):
         result = file_service.search_files(project_id, query)
         return result
     except ProjectNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except FileLikeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except SecurityViolationError as e:
+        raise HTTPException(status_code=403, detail=str(e))
+    except IOError as e:
+        raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Internal server error: {str(e)}")
+
+
+@router.post("/file", response_model=CreateFileResponse)
+def create_new_file(request: CreateFileRequest):
+    """
+    프로젝트 내에 새 파일을 생성합니다.
+
+    Args:
+        request: 파일 생성 요청 (project_id, path, content)
+
+    Returns:
+        CreateFileResponse: 생성 결과
+    """
+    try:
+        result = file_service.create_file(
+            request.project_id,
+            request.path,
+            request.content
+        )
+        return result
+    except ProjectNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except NotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
     except FileLikeError as e:
         raise HTTPException(status_code=400, detail=str(e))
